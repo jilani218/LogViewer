@@ -1,0 +1,1334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Logcat Viewer</title>
+<style>
+  :root {
+    --bg: #1e1f22;
+    --bg-elev: #2b2d30;
+    --bg-row-alt: #232529;
+    --bg-row-hover: #2e436e33;
+    --bg-row-selected: #2e436e88;
+    --border: #393b40;
+    --text: #dfe1e5;
+    --text-dim: #9da0a8;
+    --accent: #3574f0;
+    --accent-2: #4a86ff;
+    --input-bg: #1e1f22;
+    --input-border: #4e5157;
+
+    --c-V: #9da0a8;   /* Verbose */
+    --c-D: #6cb6ff;   /* Debug */
+    --c-I: #7ee787;   /* Info */
+    --c-W: #f0c674;   /* Warn */
+    --c-E: #ff7b72;   /* Error */
+    --c-A: #ff5c8d;   /* Assert / Fatal */
+
+    --hl-bg: #b08a00;
+    --hl-fg: #1e1f22;
+  }
+  html.light {
+    --bg: #ffffff;
+    --bg-elev: #f7f8fa;
+    --bg-row-alt: #f3f4f6;
+    --bg-row-hover: #e5efff;
+    --bg-row-selected: #cfe0ff;
+    --border: #d3d5db;
+    --text: #1f2328;
+    --text-dim: #6e7480;
+    --accent: #1f6feb;
+    --accent-2: #1f6feb;
+    --input-bg: #ffffff;
+    --input-border: #c4c7ce;
+
+    --c-V: #6e7480;
+    --c-D: #1f6feb;
+    --c-I: #1a7f37;
+    --c-W: #9a6700;
+    --c-E: #cf222e;
+    --c-A: #a40e26;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Toolbars */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .toolbar .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+  .toolbar label { color: var(--text-dim); font-size: 12px; }
+
+  button, .btn {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 4px 9px;
+    font-size: 12px;
+    cursor: pointer;
+    line-height: 1;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    user-select: none;
+  }
+  button:hover, .btn:hover { background: #ffffff14; border-color: var(--border); }
+  html.light button:hover, html.light .btn:hover { background: #00000010; }
+  button.primary { background: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-2); border-color: transparent; }
+  button.toggle.active { background: var(--accent); color: #fff; border-color: transparent; }
+  button[disabled] { opacity: .45; cursor: not-allowed; }
+
+  input[type="text"], select, textarea {
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    height: 26px;
+    outline: none;
+  }
+  input[type="text"]:focus, select:focus { border-color: var(--accent); }
+  textarea { height: auto; min-height: 60px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+  .grow { flex: 1; min-width: 200px; }
+
+  .level-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px; height: 24px;
+    border-radius: 4px;
+    font-weight: 700;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    border: 1px solid var(--border);
+    background: transparent;
+    cursor: pointer;
+    user-select: none;
+  }
+  .level-pill[data-on="false"] { opacity: .35; }
+  .level-pill.V { color: var(--c-V); }
+  .level-pill.D { color: var(--c-D); }
+  .level-pill.I { color: var(--c-I); }
+  .level-pill.W { color: var(--c-W); }
+  .level-pill.E { color: var(--c-E); }
+  .level-pill.A { color: var(--c-A); }
+
+  /* Drop zone */
+  #drop {
+    position: absolute; inset: 0;
+    background: #00000099;
+    color: #fff;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    border: 3px dashed var(--accent);
+    z-index: 50;
+    pointer-events: none;
+  }
+  body.dragging #drop { display: flex; }
+
+  /* Empty state */
+  .empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    color: var(--text-dim);
+    text-align: center;
+    padding: 20px;
+  }
+  .empty h2 { margin: 0; font-weight: 500; color: var(--text); }
+  .empty .sample { max-width: 720px; text-align: left; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; white-space: pre; overflow-x: auto; }
+  .empty .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
+  /* Log table area */
+  #logWrap {
+    flex: 1;
+    position: relative;
+    overflow: auto;
+    background: var(--bg);
+    font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+  #logWrap.hidden { display: none; }
+
+  table.log {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  table.log th, table.log td {
+    padding: 2px 8px;
+    vertical-align: top;
+    border-bottom: 1px solid transparent;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  table.log thead th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    font-weight: 500;
+    text-align: left;
+    z-index: 5;
+    user-select: none;
+  }
+  table.log tbody tr:nth-child(even) td { background: var(--bg-row-alt); }
+  table.log tbody tr:hover td { background: var(--bg-row-hover); }
+  table.log tbody tr.selected td { background: var(--bg-row-selected); }
+
+  body.wrap table.log td.col-msg,
+  body.wrap table.log td.col-tag {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  td.col-time { color: var(--text-dim); width: 152px; }
+  td.col-pid { color: var(--text-dim); width: 60px; text-align: right; }
+  td.col-tid { color: var(--text-dim); width: 60px; text-align: right; }
+  td.col-pkg { color: var(--text-dim); width: 180px; }
+  td.col-lvl { width: 22px; text-align: center; font-weight: 700; }
+  td.col-tag { width: 200px; color: var(--text); }
+  td.col-msg { color: var(--text); }
+
+  tr.lvl-V td.col-lvl, tr.lvl-V td.col-tag { color: var(--c-V); }
+  tr.lvl-D td.col-lvl, tr.lvl-D td.col-tag { color: var(--c-D); }
+  tr.lvl-I td.col-lvl, tr.lvl-I td.col-tag { color: var(--c-I); }
+  tr.lvl-W td.col-lvl, tr.lvl-W td.col-tag { color: var(--c-W); }
+  tr.lvl-E td.col-lvl, tr.lvl-E td.col-tag { color: var(--c-E); }
+  tr.lvl-A td.col-lvl, tr.lvl-A td.col-tag { color: var(--c-A); }
+  tr.lvl-W td.col-msg { color: var(--c-W); }
+  tr.lvl-E td.col-msg, tr.lvl-A td.col-msg { color: var(--c-E); }
+
+  body:not(.show-time) td.col-time, body:not(.show-time) th.col-time { display: none; }
+  body:not(.show-pid)  td.col-pid,  body:not(.show-pid)  th.col-pid  { display: none; }
+  body:not(.show-tid)  td.col-tid,  body:not(.show-tid)  th.col-tid  { display: none; }
+  body:not(.show-pkg)  td.col-pkg,  body:not(.show-pkg)  th.col-pkg  { display: none; }
+  body:not(.show-tag)  td.col-tag,  body:not(.show-tag)  th.col-tag  { display: none; }
+
+  mark.hl { background: var(--hl-bg); color: var(--hl-fg); border-radius: 2px; padding: 0 1px; }
+
+  /* Status bar */
+  .statusbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 4px 10px;
+    background: var(--bg-elev);
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 11px;
+    flex-wrap: wrap;
+  }
+  .statusbar .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #ffffff10;
+  }
+  html.light .statusbar .pill { background: #00000010; }
+
+  /* Details panel */
+  #detailsBar {
+    border-top: 1px solid var(--border);
+    background: var(--bg-elev);
+    max-height: 30vh;
+    overflow: auto;
+    padding: 8px 12px;
+    display: none;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #detailsBar.show { display: block; }
+  #detailsBar .meta { color: var(--text-dim); margin-bottom: 6px; }
+
+  /* Misc */
+  kbd { background: #ffffff14; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; font-family: inherit; font-size: 11px; color: var(--text-dim); }
+  html.light kbd { background: #00000010; }
+  a { color: var(--accent); }
+
+  /* Spinner */
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--text-dim);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Device bar */
+  #deviceBar { display: flex; }
+  #deviceBar.disabled select, #deviceBar.disabled button.streambtn { opacity: .45; pointer-events: none; }
+  .led {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #888; display: inline-block; margin-right: 4px;
+    box-shadow: 0 0 0 0 transparent;
+  }
+  .led.connected { background: #7ee787; }
+  .led.streaming { background: #7ee787; animation: pulse 1.4s ease-out infinite; }
+  .led.error     { background: #ff7b72; }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 #7ee78766; }
+    100% { box-shadow: 0 0 0 8px transparent; }
+  }
+  #docsBody h1, #docsBody h2, #docsBody h3 { margin: 1.1em 0 0.5em; line-height: 1.25; }
+  #docsBody h1 { font-size: 20px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  #docsBody h2 { font-size: 16px; border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+  #docsBody h3 { font-size: 14px; }
+  #docsBody p  { margin: 0.4em 0; }
+  #docsBody ul { margin: 0.4em 0; padding-left: 22px; }
+  #docsBody li { margin: 2px 0; }
+  #docsBody code { background: var(--bg); border: 1px solid var(--border); padding: 0 4px; border-radius: 3px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  #docsBody pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; overflow: auto; font-size: 12px; }
+  #docsBody pre code { background: transparent; border: 0; padding: 0; }
+  #docsBody table { border-collapse: collapse; margin: 0.6em 0; font-size: 12px; }
+  #docsBody th, #docsBody td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+  #docsBody th { background: var(--bg); }
+  #docsBody a { color: var(--c-I); }
+</style>
+</head>
+<body class="show-time show-pid show-tid show-pkg show-tag wrap">
+
+<!-- Top toolbar -->
+<div class="toolbar">
+  <button id="btnOpen" class="primary" title="Open logcat file (Ctrl/Cmd+O)">📂 Open</button>
+  <input type="file" id="file" accept=".log,.txt,.logcat,*" style="display:none" multiple />
+  <button id="btnPaste" title="Paste raw logcat text">📋 Paste</button>
+  <button id="btnSample" title="Load a small sample so you can try it out">✨ Sample</button>
+  <span class="sep"></span>
+
+  <!-- Live device streaming (uses adb-bridge.js) -->
+  <div id="deviceBar" class="disabled" style="display:flex;align-items:center;gap:6px;">
+    <span id="bridgeLed" class="led" title="Bridge status"></span>
+    <label>Device:</label>
+    <select id="deviceSel" title="Connected devices"><option value="">— no bridge —</option></select>
+    <button id="btnDevRefresh" title="Refresh device list">↻</button>
+    <label>Buffer:</label>
+    <select id="bufferSel" title="Logcat buffer">
+      <option value="main" selected>main</option>
+      <option value="system">system</option>
+      <option value="crash">crash</option>
+      <option value="events">events</option>
+      <option value="radio">radio</option>
+      <option value="all">all</option>
+    </select>
+    <button id="btnStartStream" class="streambtn primary" title="Start live streaming from selected device">▶ Start</button>
+    <button id="btnStopStream" class="streambtn" style="display:none" title="Stop streaming">■ Stop</button>
+    <button id="btnDevClear" class="streambtn" title="Clear device-side buffer (adb logcat -c)">🗑 Device</button>
+    <button id="btnConnect" title="Connect to adb-bridge">🔌 Connect</button>
+  </div>
+  <span class="sep"></span>
+
+  <!-- Level toggles -->
+  <label>Level:</label>
+  <button class="level-pill V" data-level="V" data-on="true" title="Verbose">V</button>
+  <button class="level-pill D" data-level="D" data-on="true" title="Debug">D</button>
+  <button class="level-pill I" data-level="I" data-on="true" title="Info">I</button>
+  <button class="level-pill W" data-level="W" data-on="true" title="Warn">W</button>
+  <button class="level-pill E" data-level="E" data-on="true" title="Error">E</button>
+  <button class="level-pill A" data-level="A" data-on="true" title="Assert / Fatal">A</button>
+  <select id="minLevel" title="Minimum level (like Android Studio dropdown)">
+    <option value="">— min level —</option>
+    <option value="V">Verbose+</option>
+    <option value="D">Debug+</option>
+    <option value="I">Info+</option>
+    <option value="W">Warn+</option>
+    <option value="E">Error+</option>
+    <option value="A">Assert</option>
+  </select>
+
+  <span class="sep"></span>
+
+  <!-- Search bar -->
+  <input id="query" class="grow" type="text" placeholder='Filter… try:  tag:MyTag  package:com.example  pid:1234  level:WARN  message:"crash"  -tag:Choreographer  /regex/' />
+  <button id="btnRegex" class="toggle" title="Regular expression">.*</button>
+  <button id="btnCase" class="toggle" title="Match case">Aa</button>
+  <button id="btnWord" class="toggle" title="Match whole word">⟨w⟩</button>
+  <button id="btnInvert" class="toggle" title="Invert match (show non-matching)">!</button>
+
+  <span class="sep"></span>
+
+  <!-- Visible columns -->
+  <span class="dropdown" style="position:relative">
+    <button id="btnCols" title="Toggle columns">▦ Columns</button>
+    <div id="colsMenu" style="display:none;position:absolute;right:0;top:30px;background:var(--bg-elev);border:1px solid var(--border);border-radius:6px;padding:6px 10px;z-index:30;min-width:160px;">
+      <label style="display:flex;gap:6px;align-items:center;color:var(--text);"><input type="checkbox" data-col="time" checked> Timestamp</label>
+      <label style="display:flex;gap:6px;align-items:center;color:var(--text);"><input type="checkbox" data-col="pid" checked> PID</label>
+      <label style="display:flex;gap:6px;align-items:center;color:var(--text);"><input type="checkbox" data-col="tid" checked> TID</label>
+      <label style="display:flex;gap:6px;align-items:center;color:var(--text);"><input type="checkbox" data-col="pkg" checked> Package</label>
+      <label style="display:flex;gap:6px;align-items:center;color:var(--text);"><input type="checkbox" data-col="tag" checked> Tag</label>
+    </div>
+  </span>
+
+  <button id="btnWrap" class="toggle active" title="Soft wrap long messages">↩ Wrap</button>
+  <button id="btnTheme" title="Toggle light/dark">🌗</button>
+
+  <span class="sep"></span>
+
+  <button id="btnScroll" class="toggle active" title="Auto-scroll to end / pause">⤓ Auto-scroll</button>
+  <button id="btnClear" title="Clear all loaded logs">🗑 Clear</button>
+  <button id="btnExport" title="Export visible (filtered) logs">⬇ Export</button>
+  <button id="btnCopy" title="Copy visible (filtered) logs to clipboard">📑 Copy</button>
+  <button id="btnDocs" title="View README.md (project docs)">📘 Docs</button>
+  <button id="btnHelp" title="Help / query syntax">?</button>
+</div>
+
+<!-- Empty state -->
+<div id="empty" class="empty">
+  <h2>Logcat Viewer</h2>
+  <div>Drop a logcat file anywhere, or click <b>Open</b> / <b>Paste</b> / <b>Sample</b>.</div>
+  <div class="sample">Supported formats (auto-detected):
+  threadtime  →  01-15 10:30:45.123  1234  5678 D MyTag  : message
+  time        →  01-15 10:30:45.123 D/MyTag( 1234): message
+  brief       →  D/MyTag(  1234): message
+  tag         →  D/MyTag : message
+  raw         →  message  (no metadata)</div>
+  <div class="actions">
+    <button class="primary" onclick="document.getElementById('file').click()">📂 Open file</button>
+    <button onclick="openPasteDialog()">📋 Paste</button>
+    <button onclick="loadSample()">✨ Sample</button>
+  </div>
+  <div style="font-size:11px;">Capture from a device:&nbsp; <kbd>adb logcat -v threadtime &gt; my.log</kbd></div>
+  <div style="font-size:11px;">Or stream <b>live</b> from a connected device — start the bridge:&nbsp; <kbd>node adb-bridge.js</kbd>&nbsp; then click <b>🔌 Connect</b> in the toolbar.</div>
+</div>
+
+<!-- Log area -->
+<div id="logWrap" class="hidden">
+  <table class="log" id="logTable">
+    <colgroup>
+      <col class="col-time" style="width:152px"/>
+      <col class="col-pid"  style="width:60px"/>
+      <col class="col-tid"  style="width:60px"/>
+      <col class="col-pkg"  style="width:180px"/>
+      <col class="col-lvl"  style="width:22px"/>
+      <col class="col-tag"  style="width:200px"/>
+      <col class="col-msg"/>
+    </colgroup>
+    <thead>
+      <tr>
+        <th class="col-time">Time</th>
+        <th class="col-pid">PID</th>
+        <th class="col-tid">TID</th>
+        <th class="col-pkg">Package</th>
+        <th class="col-lvl"></th>
+        <th class="col-tag">Tag</th>
+        <th class="col-msg">Message</th>
+      </tr>
+    </thead>
+    <tbody id="logBody"></tbody>
+  </table>
+</div>
+
+<!-- Selected row details -->
+<div id="detailsBar"></div>
+
+<!-- Status bar -->
+<div class="statusbar">
+  <span class="pill"><span id="statShown">0</span> / <span id="statTotal">0</span> shown</span>
+  <span class="pill" style="color:var(--c-V)">V <span id="statV">0</span></span>
+  <span class="pill" style="color:var(--c-D)">D <span id="statD">0</span></span>
+  <span class="pill" style="color:var(--c-I)">I <span id="statI">0</span></span>
+  <span class="pill" style="color:var(--c-W)">W <span id="statW">0</span></span>
+  <span class="pill" style="color:var(--c-E)">E <span id="statE">0</span></span>
+  <span class="pill" style="color:var(--c-A)">A <span id="statA">0</span></span>
+  <span style="flex:1"></span>
+  <span id="statMsg"></span>
+  <span id="statFile"></span>
+</div>
+
+<!-- Drop overlay -->
+<div id="drop">⤓ Drop logcat file to load</div>
+
+<!-- Help dialog -->
+<dialog id="helpDlg" style="background:var(--bg-elev);color:var(--text);border:1px solid var(--border);border-radius:8px;max-width:640px;padding:18px 22px;">
+  <h3 style="margin-top:0">Query syntax</h3>
+  <p>The filter box accepts free text plus Android Studio–style key:value tokens. Tokens combine with AND. Prefix with <code>-</code> to exclude.</p>
+  <ul style="line-height:1.8">
+    <li><code>tag:MyTag</code> — substring match on tag</li>
+    <li><code>tag~:^MyTag$</code> — regex match on tag</li>
+    <li><code>package:com.example</code> or <code>pkg:</code> — match package/UID column</li>
+    <li><code>pid:1234</code>, <code>tid:5678</code></li>
+    <li><code>level:W</code> or <code>level:warn</code> — exact level</li>
+    <li><code>min:I</code> — minimum level (V&lt;D&lt;I&lt;W&lt;E&lt;A)</li>
+    <li><code>message:"hello world"</code> or <code>msg:</code> — quoted phrase</li>
+    <li><code>"exact phrase"</code> — phrase match in any field</li>
+    <li><code>/regex/</code> — body regex (toggle <code>.*</code> applies regex to plain text too)</li>
+    <li><code>-tag:Choreographer</code> — exclude</li>
+  </ul>
+  <p>Shortcuts: <kbd>Cmd/Ctrl+O</kbd> open · <kbd>Cmd/Ctrl+F</kbd> focus filter · <kbd>Cmd/Ctrl+L</kbd> clear · <kbd>Cmd/Ctrl+End</kbd> jump to bottom · <kbd>Esc</kbd> clear filter</p>
+  <div style="text-align:right"><button onclick="document.getElementById('helpDlg').close()" class="primary">Got it</button></div>
+</dialog>
+
+<!-- Docs dialog (renders README.md from the bridge) -->
+<dialog id="docsDlg" style="background:var(--bg-elev);color:var(--text);border:1px solid var(--border);border-radius:8px;width:min(880px,92vw);max-height:82vh;padding:0;">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--border);">
+    <h3 style="margin:0;">README</h3>
+    <div style="display:flex;gap:6px;">
+      <button id="btnDocsRaw" title="Toggle raw markdown view">Raw</button>
+      <button onclick="document.getElementById('docsDlg').close()">✕</button>
+    </div>
+  </div>
+  <div id="docsBody" style="padding:14px 22px;overflow:auto;max-height:74vh;line-height:1.55;"></div>
+</dialog>
+
+<!-- Bridge missing dialog -->
+<dialog id="bridgeDlg" style="background:var(--bg-elev);color:var(--text);border:1px solid var(--border);border-radius:8px;max-width:560px;padding:18px 22px;">
+  <h3 style="margin-top:0">Live device streaming</h3>
+  <p>To stream logs directly from a connected Android device, run the small bridge that ships next to this HTML file:</p>
+  <pre style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;">cd <i>/path/to/this/folder</i>
+node adb-bridge.js</pre>
+  <p style="color:var(--text-dim);font-size:12px;">It exposes <code>http://localhost:8037</code>. Make sure <kbd>adb</kbd> is on your PATH (or set <code>ADB=/path/to/adb</code>). USB debugging must be enabled on the device.</p>
+  <p style="color:var(--text-dim);font-size:12px;">Tip: open <a href="http://localhost:8037/" target="_blank">http://localhost:8037/</a> instead of the local file — same UI, no CORS prompts.</p>
+  <details><summary style="cursor:pointer;color:var(--text-dim);font-size:12px;">Last error</summary>
+    <pre id="bridgeDetail" style="white-space:pre-wrap;color:var(--c-E);font-size:11px;"></pre>
+  </details>
+  <div style="text-align:right;margin-top:8px;">
+    <button onclick="document.getElementById('bridgeDlg').close()">Close</button>
+    <button class="primary" onclick="document.getElementById('bridgeDlg').close(); detectBridge(true);">Retry</button>
+  </div>
+</dialog>
+
+<!-- Paste dialog -->
+<dialog id="pasteDlg" style="background:var(--bg-elev);color:var(--text);border:1px solid var(--border);border-radius:8px;width:min(720px,90vw);padding:14px 16px;">
+  <h3 style="margin:0 0 8px 0">Paste logcat</h3>
+  <textarea id="pasteArea" style="width:100%;height:50vh;" placeholder="Paste raw logcat output here…"></textarea>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
+    <button onclick="document.getElementById('pasteDlg').close()">Cancel</button>
+    <button class="primary" onclick="loadPaste()">Load</button>
+  </div>
+</dialog>
+
+<script>
+/* ------------------------------------------------------------------
+ * Logcat viewer  —  single-file, no dependencies
+ * ------------------------------------------------------------------ */
+
+const LEVELS = ['V','D','I','W','E','A'];
+const LEVEL_RANK = { V:0, D:1, I:2, W:3, E:4, A:5, F:5 };
+const LEVEL_NAME = { V:'VERBOSE', D:'DEBUG', I:'INFO', W:'WARN', E:'ERROR', A:'ASSERT', F:'ASSERT' };
+const NAME_LEVEL = {
+  V:'V', VERBOSE:'V',
+  D:'D', DEBUG:'D',
+  I:'I', INFO:'I',
+  W:'W', WARN:'W', WARNING:'W',
+  E:'E', ERROR:'E',
+  A:'A', ASSERT:'A', FATAL:'A', F:'A'
+};
+
+/* All loaded entries */
+let entries = [];          // { id, time, pid, tid, pkg, lvl, tag, msg, raw }
+let entryById = new Map(); // id -> entry, for row → entry lookup that survives trimming
+let nextId = 1;
+const MAX_ENTRIES = 200000; // cap during streaming; oldest dropped first
+/* Visible (filtered) entries */
+let visible = [];
+/* Filter state */
+const state = {
+  enabledLevels: new Set(LEVELS),
+  minLevel: '',
+  query: '',
+  regex: false,
+  caseSensitive: false,
+  wholeWord: false,
+  invert: false,
+  autoScroll: true,
+  selectedIdx: -1,
+};
+
+const $ = sel => document.querySelector(sel);
+const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+/* ---------- Parser ---------- */
+/* Try multiple logcat formats. Returns { time, pid, tid, pkg, lvl, tag, msg } or null. */
+
+const RE = {
+  // 01-15 10:30:45.123  1234  5678 D MyTag: message
+  threadtime: /^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEAF])\s+([^:]+?)\s*:\s?(.*)$/,
+  // 2024-01-15 10:30:45.123  1234  5678 D MyTag: message
+  threadtimeIso: /^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEAF])\s+([^:]+?)\s*:\s?(.*)$/,
+  // 01-15 10:30:45.123  1234  5678 D pkg.name      MyTag: message  (Android Studio export-ish)
+  threadtimePkg: /^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEAF])\s+([\w\.\-]+)\s+([^:]+?)\s*:\s?(.*)$/,
+  // 01-15 10:30:45.123 D/MyTag(1234): message      (time format)
+  time:       /^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\s+([VDIWEAF])\/([^(]+?)\(\s*(\d+)\s*\):\s?(.*)$/,
+  // D/MyTag(1234): message                         (brief)
+  brief:      /^([VDIWEAF])\/([^(]+?)\(\s*(\d+)\s*\):\s?(.*)$/,
+  // D/MyTag: message                               (tag)
+  tag:        /^([VDIWEAF])\/([^:]+?)\s*:\s?(.*)$/,
+  // ----- buffer/header lines we should skip -----
+  buffer:     /^---------\s+beginning of/,
+};
+
+function parseLine(line) {
+  if (!line) return null;
+  if (RE.buffer.test(line)) return null;
+
+  let m;
+  if ((m = RE.threadtimePkg.exec(line))) {
+    return { time:m[1], pid:m[2], tid:m[3], lvl:lvlNorm(m[4]), pkg:m[5], tag:m[6].trim(), msg:m[7] };
+  }
+  if ((m = RE.threadtimeIso.exec(line))) {
+    return { time:m[1], pid:m[2], tid:m[3], lvl:lvlNorm(m[4]), pkg:'', tag:m[5].trim(), msg:m[6] };
+  }
+  if ((m = RE.threadtime.exec(line))) {
+    return { time:m[1], pid:m[2], tid:m[3], lvl:lvlNorm(m[4]), pkg:'', tag:m[5].trim(), msg:m[6] };
+  }
+  if ((m = RE.time.exec(line))) {
+    return { time:m[1], pid:m[4], tid:'', lvl:lvlNorm(m[2]), pkg:'', tag:m[3].trim(), msg:m[5] };
+  }
+  if ((m = RE.brief.exec(line))) {
+    return { time:'', pid:m[3], tid:'', lvl:lvlNorm(m[1]), pkg:'', tag:m[2].trim(), msg:m[4] };
+  }
+  if ((m = RE.tag.exec(line))) {
+    return { time:'', pid:'', tid:'', lvl:lvlNorm(m[1]), pkg:'', tag:m[2].trim(), msg:m[3] };
+  }
+  return { time:'', pid:'', tid:'', lvl:'I', pkg:'', tag:'', msg:line, raw:true };
+}
+
+function lvlNorm(c) { return c === 'F' ? 'A' : c; }
+
+function parseText(text) {
+  const out = [];
+  const lines = text.split(/\r?\n/);
+  let last = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.length) continue;
+    const e = parseLine(line);
+    if (!e) continue;
+    // Continuation of multi-line messages: lines that start with whitespace and don't parse as a new entry
+    if (e.raw && last && /^\s/.test(line)) {
+      last.msg += '\n' + line.replace(/^\s+/, '');
+      continue;
+    }
+    e.id = nextId++;
+    out.push(e);
+    last = e;
+  }
+  return out;
+}
+
+function indexEntries() {
+  entryById.clear();
+  for (const e of entries) entryById.set(e.id, e);
+}
+
+/* ---------- Filtering ---------- */
+
+/* Tokenize the query: returns list of {key, op, value, neg}. Free-text becomes key='_text'. */
+function tokenizeQuery(q) {
+  const tokens = [];
+  if (!q) return tokens;
+  // Match: -?key:value, -?key:"quoted", -?"phrase", -?/regex/, -?bareword, -?key~:regex
+  const re = /(-?)(?:(\w+)(~)?:)?(?:"([^"]*)"|\/((?:\\.|[^\/])+)\/|(\S+))/g;
+  let m;
+  while ((m = re.exec(q))) {
+    const neg = m[1] === '-';
+    const key = (m[2] || '_text').toLowerCase();
+    const isRegex = !!m[3] || !!m[5];
+    const value = m[4] ?? m[5] ?? m[6] ?? '';
+    tokens.push({ neg, key, value, regex: isRegex });
+  }
+  return tokens;
+}
+
+function buildMatcher() {
+  const tokens = tokenizeQuery(state.query);
+  const compiled = tokens.map(t => {
+    const flags = state.caseSensitive ? '' : 'i';
+    let test;
+    if (t.regex) {
+      try { const re = new RegExp(t.value, flags); test = s => re.test(s); }
+      catch { test = () => true; }
+    } else if (state.wholeWord && !['pid','tid','level','min'].includes(t.key)) {
+      const esc = t.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`\\b${esc}\\b`, flags);
+      test = s => re.test(s);
+    } else {
+      const v = state.caseSensitive ? t.value : t.value.toLowerCase();
+      test = s => (state.caseSensitive ? s : s.toLowerCase()).includes(v);
+    }
+    return { ...t, test };
+  });
+
+  // Free-text mode: if regex toggle on and no key: tokens → treat whole query as regex
+  let bodyRegex = null;
+  if (state.regex && state.query && !tokens.some(t => t.key !== '_text')) {
+    try { bodyRegex = new RegExp(state.query, state.caseSensitive ? '' : 'i'); }
+    catch {}
+  }
+
+  return function (e) {
+    // Level filters
+    if (!state.enabledLevels.has(e.lvl)) return false;
+    if (state.minLevel && LEVEL_RANK[e.lvl] < LEVEL_RANK[state.minLevel]) return false;
+
+    let ok = true;
+    if (bodyRegex) {
+      ok = bodyRegex.test(e.msg) || bodyRegex.test(e.tag) || bodyRegex.test(e.pkg);
+    } else {
+      for (const t of compiled) {
+        let r;
+        switch (t.key) {
+          case 'tag':     r = t.test(e.tag); break;
+          case 'msg':
+          case 'message': r = t.test(e.msg); break;
+          case 'pkg':
+          case 'package': r = t.test(e.pkg); break;
+          case 'pid':     r = String(e.pid) === String(t.value); break;
+          case 'tid':     r = String(e.tid) === String(t.value); break;
+          case 'level':
+          case 'lvl':     r = e.lvl === (NAME_LEVEL[t.value.toUpperCase()] || t.value.toUpperCase()); break;
+          case 'min':     r = LEVEL_RANK[e.lvl] >= (LEVEL_RANK[NAME_LEVEL[t.value.toUpperCase()] || t.value.toUpperCase()] ?? -1); break;
+          case '_text':
+          default:        r = t.test(e.msg) || t.test(e.tag) || t.test(e.pkg); break;
+        }
+        if (t.neg) r = !r;
+        if (!r) { ok = false; break; }
+      }
+    }
+    return state.invert ? !ok : ok;
+  };
+}
+
+/* ---------- Render ---------- */
+
+const body = document.getElementById('logBody');
+const wrap = document.getElementById('logWrap');
+const empty = document.getElementById('empty');
+let renderTimer = null;
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function highlightHtml(s) {
+  s = escapeHtml(s);
+  if (!state.query) return s;
+  const tokens = tokenizeQuery(state.query).filter(t => !t.neg && t.key === '_text');
+  if (state.regex && tokens.length) {
+    try {
+      const re = new RegExp('(' + tokens.map(t => t.value).join('|') + ')', state.caseSensitive ? 'g' : 'gi');
+      return s.replace(re, '<mark class="hl">$1</mark>');
+    } catch { return s; }
+  }
+  for (const t of tokens) {
+    if (!t.value) continue;
+    const esc = t.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    try {
+      const re = new RegExp(esc, state.caseSensitive ? 'g' : 'gi');
+      s = s.replace(re, m => `<mark class="hl">${m}</mark>`);
+    } catch {}
+  }
+  return s;
+}
+
+let currentMatcher = () => true;
+function applyFilter() {
+  currentMatcher = buildMatcher();
+  visible = entries.filter(currentMatcher);
+  scheduleRender();
+  updateStats();
+}
+
+/* Build the HTML for a single row. */
+function rowHtml(e) {
+  return `<tr class="lvl-${e.lvl}" data-id="${e.id}">` +
+    `<td class="col-time">${escapeHtml(e.time)}</td>` +
+    `<td class="col-pid">${escapeHtml(e.pid)}</td>` +
+    `<td class="col-tid">${escapeHtml(e.tid)}</td>` +
+    `<td class="col-pkg">${escapeHtml(e.pkg)}</td>` +
+    `<td class="col-lvl">${e.lvl}</td>` +
+    `<td class="col-tag" title="${escapeHtml(e.tag)}">${highlightHtml(e.tag)}</td>` +
+    `<td class="col-msg">${highlightHtml(e.msg)}</td>` +
+  `</tr>`;
+}
+
+function scheduleRender() {
+  if (renderTimer) cancelAnimationFrame(renderTimer);
+  renderTimer = requestAnimationFrame(render);
+}
+
+const MAX_RENDER = 20000;   // cap to keep DOM responsive
+let renderedCount = 0;
+
+function render() {
+  if (entries.length === 0) {
+    wrap.classList.add('hidden');
+    empty.style.display = '';
+    body.innerHTML = '';
+    return;
+  }
+  empty.style.display = 'none';
+  wrap.classList.remove('hidden');
+
+  const slice = visible.length > MAX_RENDER ? visible.slice(-MAX_RENDER) : visible;
+  renderedCount = slice.length;
+
+  // Build HTML in chunks to keep things snappy
+  const parts = new Array(slice.length);
+  for (let i = 0; i < slice.length; i++) parts[i] = rowHtml(slice[i]);
+  body.innerHTML = parts.join('');
+
+  if (visible.length > MAX_RENDER) {
+    const note = document.createElement('div');
+    note.style.cssText = 'padding:6px 10px;color:var(--text-dim);font-size:11px;background:var(--bg-elev);position:sticky;bottom:0;border-top:1px solid var(--border);';
+    note.textContent = `Showing last ${MAX_RENDER.toLocaleString()} of ${visible.length.toLocaleString()} matching rows. Refine the filter to see earlier rows.`;
+    body.parentElement.parentElement.appendChild(note);
+    setTimeout(() => note.remove(), 1500);
+  }
+
+  if (state.autoScroll) wrap.scrollTop = wrap.scrollHeight;
+}
+
+function updateStats() {
+  $('#statShown').textContent = visible.length.toLocaleString();
+  $('#statTotal').textContent = entries.length.toLocaleString();
+  const counts = { V:0,D:0,I:0,W:0,E:0,A:0 };
+  for (const e of entries) counts[e.lvl] = (counts[e.lvl]||0) + 1;
+  for (const k of LEVELS) $('#stat'+k).textContent = counts[k].toLocaleString();
+}
+
+/* ---------- Loading ---------- */
+
+function load(text, fileName) {
+  stopStream();
+  const t0 = performance.now();
+  setStatus('Parsing…', true);
+  // Defer to next tick so the spinner shows
+  setTimeout(() => {
+    entries = parseText(text);
+    indexEntries();
+    state.selectedIdx = -1;
+    document.getElementById('detailsBar').classList.remove('show');
+    applyFilter();
+    setStatus(`Parsed ${entries.length.toLocaleString()} entries in ${Math.round(performance.now()-t0)} ms`, false);
+    if (fileName) $('#statFile').textContent = fileName;
+  }, 0);
+}
+
+function setStatus(msg, busy) {
+  $('#statMsg').innerHTML = (busy ? '<span class="spinner"></span> ' : '') + escapeHtml(msg);
+}
+
+/* ---------- Event wiring ---------- */
+
+// File input
+$('#btnOpen').onclick = () => $('#file').click();
+$('#file').onchange = async e => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  let text = '';
+  for (const f of files) text += (text ? '\n' : '') + await f.text();
+  load(text, files.map(f => f.name).join(', '));
+  e.target.value = '';
+};
+
+// Drag & drop
+['dragenter','dragover'].forEach(t => window.addEventListener(t, e => { e.preventDefault(); document.body.classList.add('dragging'); }));
+['dragleave','drop'].forEach(t => window.addEventListener(t, e => { e.preventDefault(); if (t==='dragleave' && e.relatedTarget) return; document.body.classList.remove('dragging'); }));
+window.addEventListener('drop', async e => {
+  const files = Array.from(e.dataTransfer.files || []);
+  if (!files.length) return;
+  let text = '';
+  for (const f of files) text += (text ? '\n' : '') + await f.text();
+  load(text, files.map(f=>f.name).join(', '));
+});
+
+// Paste dialog
+$('#btnPaste').onclick = openPasteDialog;
+function openPasteDialog() { $('#pasteArea').value = ''; $('#pasteDlg').showModal(); setTimeout(()=>$('#pasteArea').focus(),0); }
+function loadPaste() { const t = $('#pasteArea').value; $('#pasteDlg').close(); if (t.trim()) load(t, 'pasted'); }
+window.loadPaste = loadPaste;
+window.openPasteDialog = openPasteDialog;
+
+// Sample
+$('#btnSample').onclick = loadSample;
+function loadSample() {
+  const sample = `--------- beginning of main
+01-15 10:30:45.123  1234  1234 I ActivityManager: Start proc com.example.app for activity {com.example.app/.MainActivity}
+01-15 10:30:45.234  1234  1290 D MyApp   : onCreate called with savedInstanceState=null
+01-15 10:30:45.245  1234  1290 V Choreographer: Skipped 0 frames
+01-15 10:30:45.301  1234  1290 I MyApp   : Loaded 42 items from cache
+01-15 10:30:45.402  1234  1300 W NetworkMonitor: Slow network detected: 320ms RTT
+01-15 10:30:45.501  1234  1290 D MyApp   : Rendering list view, items=42
+01-15 10:30:45.612  1234  1300 E NetworkMonitor: Failed to reach https://api.example.com/v1/users
+    java.net.SocketTimeoutException: connect timed out
+        at libcore.io.IoBridge.connectErrno(IoBridge.java:185)
+        at libcore.io.IoBridge.connect(IoBridge.java:129)
+01-15 10:30:45.701  1234  1290 I MyApp   : Retrying with exponential backoff (attempt 2)
+01-15 10:30:45.802  1234  1290 D MyApp   : Cache hit for key=user:42
+01-15 10:30:45.910  1234  1290 W MyApp   : Deprecated API used: getDefaultSharedPreferences()
+01-15 10:30:45.999  1234  1290 A MyApp   : ASSERTION FAILED: items must be non-null
+01-15 10:30:46.011  1234  1290 I MyApp   : Frame rendered in 16.7ms (60 FPS)
+01-15 10:30:46.123  1234  1290 D MyApp   : Touch event x=120 y=240
+01-15 10:30:46.234  1234  1290 V GestureDetector: onSingleTapUp(MotionEvent { action=ACTION_UP })
+`;
+  load(sample, 'sample.log');
+}
+window.loadSample = loadSample;
+
+// Level pills
+$$('.level-pill').forEach(b => b.onclick = () => {
+  const on = b.dataset.on === 'true';
+  b.dataset.on = String(!on);
+  if (on) state.enabledLevels.delete(b.dataset.level);
+  else    state.enabledLevels.add(b.dataset.level);
+  applyFilter();
+});
+$('#minLevel').onchange = e => { state.minLevel = e.target.value; applyFilter(); };
+
+// Search
+const queryEl = $('#query');
+let qTimer;
+queryEl.addEventListener('input', () => {
+  clearTimeout(qTimer);
+  qTimer = setTimeout(() => { state.query = queryEl.value; applyFilter(); }, 120);
+});
+const toggle = (id, key) => {
+  const b = $(id);
+  b.onclick = () => { state[key] = !state[key]; b.classList.toggle('active', state[key]); applyFilter(); };
+};
+toggle('#btnRegex', 'regex');
+toggle('#btnCase',  'caseSensitive');
+toggle('#btnWord',  'wholeWord');
+toggle('#btnInvert','invert');
+
+// Wrap
+$('#btnWrap').onclick = () => { document.body.classList.toggle('wrap'); $('#btnWrap').classList.toggle('active', document.body.classList.contains('wrap')); };
+
+// Theme
+$('#btnTheme').onclick = () => { document.documentElement.classList.toggle('light'); };
+
+// Auto-scroll
+$('#btnScroll').onclick = () => { state.autoScroll = !state.autoScroll; $('#btnScroll').classList.toggle('active', state.autoScroll); if (state.autoScroll) wrap.scrollTop = wrap.scrollHeight; };
+wrap.addEventListener('scroll', () => {
+  // pause auto-scroll if user scrolls up
+  const atBottom = wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 4;
+  if (!atBottom && state.autoScroll) { state.autoScroll = false; $('#btnScroll').classList.remove('active'); }
+});
+
+// Clear
+$('#btnClear').onclick = () => {
+  if (!entries.length) return;
+  if (!confirm('Clear all loaded logs?')) return;
+  entries = []; visible = []; entryById.clear();
+  applyFilter();
+  $('#statFile').textContent = '';
+  setStatus('', false);
+};
+
+// Export
+$('#btnExport').onclick = () => {
+  if (!visible.length) return;
+  const lines = visible.map(formatThreadtime).join('\n');
+  const blob = new Blob([lines + '\n'], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'logcat-filtered.log';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+$('#btnCopy').onclick = async () => {
+  if (!visible.length) return;
+  await navigator.clipboard.writeText(visible.map(formatThreadtime).join('\n'));
+  setStatus(`Copied ${visible.length.toLocaleString()} lines`, false);
+};
+function formatThreadtime(e) {
+  const pad = (s, n) => String(s).padStart(n);
+  return `${e.time || ''} ${pad(e.pid,5)} ${pad(e.tid,5)} ${e.lvl} ${e.tag}: ${e.msg}`.trim();
+}
+
+// Columns dropdown
+$('#btnCols').onclick = e => {
+  e.stopPropagation();
+  const m = $('#colsMenu'); m.style.display = m.style.display === 'none' ? '' : 'none';
+};
+window.addEventListener('click', () => $('#colsMenu').style.display = 'none');
+$$('#colsMenu input').forEach(cb => cb.onchange = () => {
+  document.body.classList.toggle('show-' + cb.dataset.col, cb.checked);
+});
+
+// Help
+$('#btnHelp').onclick = () => $('#helpDlg').showModal();
+
+// Docs (README.md) — served by the bridge at /readme.md. Falls back to an
+// inline message when opened from file:// (bridge not running).
+(() => {
+  const dlg = $('#docsDlg'), bodyEl = $('#docsBody'), rawBtn = $('#btnDocsRaw');
+  let rawMd = '', showRaw = false;
+
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const inline = s => s
+    .replace(/`([^`]+)`/g, (_,c) => `<code>${esc(c)}</code>`)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_,t,u) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t)}</a>`);
+
+  function renderMd(md) {
+    const parts = md.split(/```([\s\S]*?)```/);
+    let out = '';
+    parts.forEach((p, i) => {
+      if (i % 2 === 1) {
+        const nl = p.indexOf('\n');
+        const body = nl >= 0 ? p.slice(nl + 1) : p;
+        out += `<pre><code>${esc(body.replace(/\n$/, ''))}</code></pre>`;
+        return;
+      }
+      const lines = p.split('\n');
+      let k = 0;
+      while (k < lines.length) {
+        const line = lines[k];
+        const h = line.match(/^(#{1,6})\s+(.*)$/);
+        if (h) { const n = h[1].length; out += `<h${n}>${inline(esc(h[2]))}</h${n}>`; k++; continue; }
+        if (/^\s*\|.*\|\s*$/.test(line) && k+1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[k+1])) {
+          const hdr = line.trim().replace(/^\||\|$/g,'').split('|').map(c => c.trim());
+          k += 2;
+          const rows = [];
+          while (k < lines.length && /^\s*\|.*\|\s*$/.test(lines[k])) {
+            rows.push(lines[k].trim().replace(/^\||\|$/g,'').split('|').map(c => c.trim())); k++;
+          }
+          out += '<table><thead><tr>' + hdr.map(c => `<th>${inline(esc(c))}</th>`).join('') + '</tr></thead><tbody>';
+          rows.forEach(r => { out += '<tr>' + r.map(c => `<td>${inline(esc(c))}</td>`).join('') + '</tr>'; });
+          out += '</tbody></table>';
+          continue;
+        }
+        if (/^\s*[-*]\s+/.test(line)) {
+          out += '<ul>';
+          while (k < lines.length && /^\s*[-*]\s+/.test(lines[k])) {
+            out += `<li>${inline(esc(lines[k].replace(/^\s*[-*]\s+/, '')))}</li>`; k++;
+          }
+          out += '</ul>';
+          continue;
+        }
+        if (!line.trim()) { k++; continue; }
+        const para = [line]; k++;
+        while (k < lines.length && lines[k].trim() && !/^(#{1,6})\s/.test(lines[k]) && !/^\s*[-*]\s+/.test(lines[k]) && !/^\s*\|/.test(lines[k])) {
+          para.push(lines[k]); k++;
+        }
+        out += `<p>${inline(esc(para.join(' ')))}</p>`;
+      }
+    });
+    return out;
+  }
+
+  function paint() {
+    if (!rawMd) return;
+    if (showRaw) {
+      bodyEl.innerHTML = `<pre style="white-space:pre-wrap;">${esc(rawMd)}</pre>`;
+    } else {
+      bodyEl.innerHTML = renderMd(rawMd);
+    }
+  }
+
+  rawBtn.onclick = () => { showRaw = !showRaw; rawBtn.classList.toggle('active', showRaw); paint(); };
+
+  $('#btnDocs').onclick = async () => {
+    dlg.showModal();
+    bodyEl.innerHTML = '<p style="color:var(--text-dim)">Loading README.md…</p>';
+    try {
+      const r = await fetch('/readme.md', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      rawMd = await r.text();
+      paint();
+    } catch (e) {
+      bodyEl.innerHTML = '<p style="color:var(--c-W)">Couldn\'t load <code>README.md</code> from the bridge.</p>'
+        + '<p style="color:var(--text-dim);font-size:12px;">Start the bridge (<kbd>./start.sh</kbd> or <kbd>start.cmd</kbd>) and open <a href="http://localhost:8037/" target="_blank">http://localhost:8037/</a>, or open <code>README.md</code> directly from the project folder.</p>';
+    }
+  };
+})();
+
+// Row click → details + click-to-filter
+body.addEventListener('click', e => {
+  const tr = e.target.closest('tr');
+  if (!tr) return;
+  $$('tr.selected').forEach(r => r.classList.remove('selected'));
+  tr.classList.add('selected');
+  const ent = entryById.get(+tr.dataset.id);
+  if (!ent) return;
+  state.selectedIdx = ent.id;
+
+  const d = $('#detailsBar');
+  d.classList.add('show');
+  const meta = `${ent.time || ''}   pid=${ent.pid||'-'}   tid=${ent.tid||'-'}   ${ent.pkg ? 'package='+ent.pkg+'   ' : ''}level=${LEVEL_NAME[ent.lvl]}   tag=${ent.tag||'-'}`;
+  d.innerHTML = `<div class="meta">${escapeHtml(meta)}</div>${escapeHtml(ent.msg)}`;
+});
+
+// Double-click tag/pid/pkg cell to add filter token
+body.addEventListener('dblclick', e => {
+  const td = e.target.closest('td');
+  if (!td) return;
+  const tr = td.closest('tr'); if (!tr) return;
+  const ent = entryById.get(+tr.dataset.id);
+  if (!ent) return;
+  let tok = '';
+  if (td.classList.contains('col-tag')) tok = `tag:"${ent.tag}"`;
+  else if (td.classList.contains('col-pid')) tok = `pid:${ent.pid}`;
+  else if (td.classList.contains('col-tid')) tok = `tid:${ent.tid}`;
+  else if (td.classList.contains('col-pkg')) tok = `package:"${ent.pkg}"`;
+  else if (td.classList.contains('col-lvl')) tok = `level:${ent.lvl}`;
+  if (tok) {
+    queryEl.value = (queryEl.value ? queryEl.value + ' ' : '') + tok;
+    state.query = queryEl.value;
+    applyFilter();
+  }
+});
+
+// Keyboard shortcuts
+window.addEventListener('keydown', e => {
+  const cmd = e.metaKey || e.ctrlKey;
+  if (cmd && e.key === 'o') { e.preventDefault(); $('#file').click(); }
+  else if (cmd && e.key === 'f') { e.preventDefault(); queryEl.focus(); queryEl.select(); }
+  else if (cmd && e.key === 'l') { e.preventDefault(); $('#btnClear').click(); }
+  else if (cmd && e.key === 'End') { e.preventDefault(); wrap.scrollTop = wrap.scrollHeight; }
+  else if (e.key === 'Escape' && document.activeElement === queryEl) { queryEl.value=''; state.query=''; applyFilter(); }
+});
+
+/* ============================================================
+ * Live streaming via adb-bridge.js
+ * ============================================================ */
+const params = new URLSearchParams(location.search);
+const BRIDGE_BASE = (params.get('bridge')
+  || (location.protocol === 'http:' ? location.origin : 'http://localhost:8037')
+).replace(/\/$/, '');
+
+let bridgeOnline = false;
+let es = null;                  // EventSource
+let streaming = false;
+let streamCarry = '';           // partial line carryover (defensive)
+let pendingFlush = [];          // entries waiting to be appended to DOM
+let flushTimer = null;
+let lastStreamedEntry = null;   // for stack-trace continuation
+
+const ledEl       = $('#bridgeLed');
+const deviceBar   = $('#deviceBar');
+const deviceSel   = $('#deviceSel');
+const bufferSel   = $('#bufferSel');
+const btnStart    = $('#btnStartStream');
+const btnStop     = $('#btnStopStream');
+const btnConnect  = $('#btnConnect');
+const btnDevRefr  = $('#btnDevRefresh');
+const btnDevClear = $('#btnDevClear');
+
+function setLed(klass, title) { ledEl.className = 'led ' + (klass || ''); ledEl.title = title || ''; }
+
+async function detectBridge(silent = true) {
+  try {
+    const r = await fetch(BRIDGE_BASE + '/health', { signal: AbortSignal.timeout(900) });
+    if (!r.ok) throw new Error('bad status');
+    const j = await r.json();
+    bridgeOnline = !!j.ok;
+    if (bridgeOnline) {
+      deviceBar.classList.remove('disabled');
+      setLed('connected', `Bridge online — ${j.adb || 'adb ok'}`);
+      btnConnect.textContent = '🔌 Connected';
+      await refreshDevices();
+    } else {
+      throw new Error(j.error || 'adb not callable');
+    }
+    return true;
+  } catch (e) {
+    bridgeOnline = false;
+    deviceBar.classList.add('disabled');
+    setLed('', 'Bridge offline — start with: node adb-bridge.js');
+    btnConnect.textContent = '🔌 Connect';
+    if (!silent) showBridgeMissing(String(e.message || e));
+    return false;
+  }
+}
+
+async function refreshDevices() {
+  if (!bridgeOnline) return;
+  try {
+    const r = await fetch(BRIDGE_BASE + '/devices');
+    const j = await r.json();
+    const devs = j.devices || [];
+    const prev = deviceSel.value;
+    deviceSel.innerHTML = '';
+    if (!devs.length) {
+      deviceSel.innerHTML = '<option value="">— no devices —</option>';
+      btnStart.disabled = true;
+      return;
+    }
+    for (const d of devs) {
+      const opt = document.createElement('option');
+      opt.value = d.serial;
+      const label = d.model ? `${d.model} (${d.serial})` : d.serial;
+      const stateTag = d.state !== 'device' ? `  [${d.state}]` : '';
+      opt.textContent = label + stateTag;
+      opt.disabled = d.state !== 'device';
+      deviceSel.appendChild(opt);
+    }
+    if (prev && [...deviceSel.options].some(o => o.value === prev)) deviceSel.value = prev;
+    btnStart.disabled = false;
+  } catch (e) {
+    setLed('error', 'Failed to list devices: ' + e.message);
+  }
+}
+
+function startStream() {
+  if (!bridgeOnline) { detectBridge(false); return; }
+  const serial = deviceSel.value;
+  if (!serial) { alert('No device selected.'); return; }
+  stopStream();
+
+  const url = `${BRIDGE_BASE}/stream`
+    + `?serial=${encodeURIComponent(serial)}`
+    + `&buffer=${encodeURIComponent(bufferSel.value)}`
+    + `&format=threadtime`;
+  es = new EventSource(url);
+  streaming = true;
+  state.autoScroll = true;
+  $('#btnScroll').classList.add('active');
+  btnStart.style.display = 'none';
+  btnStop.style.display = '';
+  setLed('streaming', `Streaming from ${serial} (${bufferSel.value})`);
+  setStatus(`Streaming from ${serial} • ${bufferSel.value}`);
+  $('#statFile').textContent = `${serial} : ${bufferSel.value}`;
+
+  es.onmessage = ev => {
+    // Bridge encodes embedded newlines as "\n"
+    const line = ev.data.replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
+    addStreamedLine(line);
+  };
+  es.addEventListener('stderr', ev => setStatus('adb: ' + ev.data));
+  es.addEventListener('end',    ev => { setStatus(`Stream ended (exit ${ev.data})`); stopStream(); });
+  es.onerror = () => {
+    setLed('error', 'Stream error — bridge or device disconnected');
+    setStatus('Stream error — connection lost');
+    stopStream();
+  };
+}
+
+function stopStream() {
+  if (es) { try { es.close(); } catch {} es = null; }
+  if (!streaming) return;
+  streaming = false;
+  lastStreamedEntry = null;
+  btnStart.style.display = '';
+  btnStop.style.display  = 'none';
+  if (bridgeOnline) setLed('connected', 'Bridge online');
+  flushPending(); // flush whatever is pending so UI is consistent
+}
+
+function addStreamedLine(line) {
+  if (!line) return;
+  // Drop adb headers
+  if (RE.buffer.test(line)) return;
+
+  const e = parseLine(line);
+  if (!e) return;
+
+  // Stack-trace continuation: indented raw lines append to previous entry
+  if (e.raw && lastStreamedEntry && /^\s/.test(line)) {
+    lastStreamedEntry.msg += '\n' + line.replace(/^\s+/, '');
+    // Don't try to update the existing DOM row mid-flight; redraw will pick it up
+    return;
+  }
+
+  e.id = nextId++;
+  entries.push(e);
+  entryById.set(e.id, e);
+  lastStreamedEntry = e;
+
+  // Cap memory
+  if (entries.length > MAX_ENTRIES) {
+    const drop = entries.splice(0, Math.floor(MAX_ENTRIES * 0.1));
+    for (const d of drop) entryById.delete(d.id);
+  }
+
+  pendingFlush.push(e);
+  if (!flushTimer) flushTimer = setTimeout(flushPending, 80);
+}
+
+function flushPending() {
+  flushTimer = null;
+  if (!pendingFlush.length) { updateStats(); return; }
+
+  // First-render: switch out of empty state.
+  if (body.children.length === 0 && entries.length) {
+    empty.style.display = 'none';
+    wrap.classList.remove('hidden');
+  }
+
+  let html = '';
+  let added = 0;
+  for (const e of pendingFlush) {
+    if (currentMatcher(e)) {
+      visible.push(e);
+      html += rowHtml(e);
+      added++;
+    }
+  }
+  pendingFlush = [];
+
+  if (added) {
+    body.insertAdjacentHTML('beforeend', html);
+    // Trim DOM rows to MAX_RENDER
+    while (body.children.length > MAX_RENDER) body.firstChild.remove();
+  }
+  updateStats();
+  if (state.autoScroll) wrap.scrollTop = wrap.scrollHeight;
+}
+
+// Wiring
+btnConnect.onclick  = () => detectBridge(false);
+btnDevRefr.onclick  = () => refreshDevices();
+btnStart.onclick    = () => startStream();
+btnStop.onclick     = () => { stopStream(); setStatus('Stream stopped'); };
+btnDevClear.onclick = async () => {
+  if (!bridgeOnline) { detectBridge(false); return; }
+  const serial = deviceSel.value;
+  try {
+    const r = await fetch(`${BRIDGE_BASE}/clear?serial=${encodeURIComponent(serial)}`, { method: 'POST' });
+    setStatus(r.ok ? `Cleared device buffer on ${serial}` : 'Clear failed');
+  } catch (e) { setStatus('Clear failed: ' + e.message); }
+};
+
+function showBridgeMissing(detail) {
+  const dlg = document.getElementById('bridgeDlg');
+  document.getElementById('bridgeDetail').textContent = detail || '';
+  dlg.showModal();
+}
+window.showBridgeMissing = showBridgeMissing;
+window.detectBridge = detectBridge;
+
+// Auto-detect on load + light periodic refresh while online
+detectBridge(true);
+setInterval(() => { if (bridgeOnline && !streaming && !document.hidden) refreshDevices(); }, 5000);
+
+// Initial paint
+updateStats();
+</script>
+</body>
+</html>
